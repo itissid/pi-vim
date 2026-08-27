@@ -909,6 +909,41 @@ describe("transcript navigation mappings", () => {
   });
 });
 
+describe("insert mode control bindings", () => {
+  const ctrlDExitKeybindings = {
+    matches: (data: string, action: string) =>
+      data === "\x04" && action === "app.exit",
+  } as typeof stubKeybindings;
+
+  it("does not exit when Ctrl-D is pressed on an empty prompt", () => {
+    let exitCalls = 0;
+    const editor = new ModalEditor(stubTui, stubTheme, ctrlDExitKeybindings);
+    editor.onCtrlD = () => {
+      exitCalls++;
+    };
+
+    sendKeys(editor, ["\x04"]);
+
+    assert.equal(exitCalls, 0);
+    assert.equal(editor.getText(), "");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("uses Ctrl-D to delete the next character", () => {
+    let exitCalls = 0;
+    const editor = new ModalEditor(stubTui, stubTheme, ctrlDExitKeybindings);
+    editor.onCtrlD = () => {
+      exitCalls++;
+    };
+
+    sendKeys(editor, ["abc", "\x1b", "0", "i", "\x04"]);
+
+    assert.equal(exitCalls, 0);
+    assert.equal(editor.getText(), "bc");
+    assert.equal(editor.getMode(), "insert");
+  });
+});
+
 describe("transcript search mapping", () => {
   it("opens transcript search with slash in normal mode", () => {
     let searchCalls = 0;

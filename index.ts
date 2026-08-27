@@ -126,6 +126,7 @@ const MODE_COLOR_KEYS: readonly ModeColorKey[] = [
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
+const DELETE_KEY_INPUT = "\x1b[3~";
 const MAX_COUNT = 9999;
 const TEXT_INSERT_REPEAT_KEYS = new Set(["i", "a", "A", "I"]);
 const OPEN_LINE_REPEAT_KEYS = new Set(["o", "O"]);
@@ -1361,6 +1362,13 @@ export class ModalEditor extends CustomEditor {
       }
 
       if ("insert" === this.mode) {
+        if (matchesKey(data, Key.ctrl("d"))) {
+          // CustomEditor treats Ctrl-D on an empty prompt as app.exit. Forward
+          // the equivalent Delete key instead so Insert mode keeps its editing
+          // behavior without terminating Pi.
+          super.handleInput(DELETE_KEY_INPUT);
+          return;
+        }
         if (matchesKey(data, Key.shiftAlt("a")) || data === "\x1bA") {
           super.handleInput(CTRL_E);
           return;
