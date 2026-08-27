@@ -147,7 +147,8 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 | key | action |
 |---|---|
 | `h` / `l`; `{count}h/l` | Move left/right within the prompt |
-| `j` / `k`; `{count}j/k` | Scroll the fullscreen chat transcript down/up by line |
+| `j` / `k`; `{count}j/k` | Move down/up within the prompt |
+| `Ctrl+j` / `Ctrl+k`; `{count}Ctrl+j/k` | Scroll the fullscreen chat transcript down/up by line |
 | `Ctrl+d` / `Ctrl+u` | Scroll the transcript down/up by half a page |
 | `Ctrl+f` / `Ctrl+b` | Scroll the transcript down/up by a full page |
 | `0` / `^` / `_` / `$` | Line start / first non-whitespace / counted first non-whitespace / line end |
@@ -158,7 +159,7 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 | `{` / `}`; `{count}{` / `{count}}` | Previous/next paragraph start |
 | `%` | Jump to the matching `()`, `[]`, or `{}` partner |
 
-Transcript navigation is Normal-mode-only; Insert-mode `j` and `k` remain ordinary text. Counts multiply transcript line/page movement. Operator-pending `j`/`k` keep their linewise prompt-editing behavior (`d2j`, `c3k`, and similar).
+Transcript navigation is Normal-mode-only; Insert-mode `Ctrl+j` and `Ctrl+k` are consumed without editing, while plain `j` and `k` remain ordinary text. Counts multiply transcript line/page movement. Plain and operator-pending `j`/`k` keep their prompt-navigation behavior (`2j`, `d2j`, `c3k`, and similar).
 
 `word` splits punctuation from keyword chars; `WORD` treats any non-whitespace run as one token (`foo-bar`, `path/to`). Paragraph starts are non-blank lines at BOF or after blank lines (`^\s*$`). `{` / `}` are navigation-only; brace operator forms (`d{`, `c}`, `y{`, …) are out of scope.
 

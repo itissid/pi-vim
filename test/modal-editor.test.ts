@@ -860,7 +860,10 @@ describe("wrapper-facing editor surface", () => {
 // ---------------------------------------------------------------------------
 
 describe("transcript navigation mappings", () => {
-  it("scrolls transcript lines with j and k in normal mode", () => {
+  const ctrlJ = "\x1b[106;5u";
+  const ctrlK = "\x1b[107;5u";
+
+  it("scrolls transcript lines with Ctrl-J and Ctrl-K in normal mode", () => {
     const scrolls: string[] = [];
     const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
       onTranscriptScroll: ({ unit, direction, count }) => {
@@ -868,11 +871,27 @@ describe("transcript navigation mappings", () => {
       },
     });
 
-    sendKeys(editor, ["hello\nworld", "\x1b", "j", "k", "3", "j"]);
+    sendKeys(editor, ["hello\nworld", "\x1b", ctrlJ, ctrlK, "3", ctrlJ]);
 
     assert.deepEqual(scrolls, ["line:down:1", "line:up:1", "line:down:3"]);
     assert.equal(editor.getText(), "hello\nworld");
     assert.equal(editor.getMode(), "normal");
+  });
+
+  it("uses plain j and k for prompt movement in normal mode", () => {
+    let scrollCalls = 0;
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      onTranscriptScroll: () => {
+        scrollCalls++;
+      },
+    });
+
+    editor.setText("one\ntwo\nthree");
+    sendKeys(editor, ["\x1b", "g", "g", "j", "k", "2", "j"]);
+
+    assert.equal(scrollCalls, 0);
+    assert.deepEqual(editor.getCursor(), { line: 2, col: 0 });
+    assert.equal(editor.getText(), "one\ntwo\nthree");
   });
 
   it("scrolls transcript by half and full pages with Vim control keys", () => {
@@ -893,7 +912,7 @@ describe("transcript navigation mappings", () => {
     ]);
   });
 
-  it("keeps j and k as ordinary text in insert mode", () => {
+  it("keeps plain j and k as ordinary text in insert mode", () => {
     let scrollCalls = 0;
     const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
       onTranscriptScroll: () => {
@@ -905,6 +924,30 @@ describe("transcript navigation mappings", () => {
 
     assert.equal(scrollCalls, 0);
     assert.equal(editor.getText(), "jk");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("consumes Ctrl-J and Ctrl-K without editing in insert mode", () => {
+    let scrollCalls = 0;
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      onTranscriptScroll: () => {
+        scrollCalls++;
+      },
+    });
+
+    sendKeys(editor, ["abc", "\x1b", "0", "i", ctrlJ, ctrlK]);
+
+    assert.equal(scrollCalls, 0);
+    assert.equal(editor.getText(), "abc");
+    assert.equal(editor.getMode(), "insert");
+  });
+
+  it("keeps Enter distinct from disambiguated Ctrl-J in insert mode", () => {
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings);
+
+    sendKeys(editor, ["a", "\n", "b"]);
+
+    assert.equal(editor.getText(), "a\nb");
     assert.equal(editor.getMode(), "insert");
   });
 });

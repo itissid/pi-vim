@@ -128,6 +128,10 @@ const BRACKETED_PASTE_END = "\x1b[201~";
 const BRACKETED_PASTE_END_TAIL = BRACKETED_PASTE_END.slice(1);
 const DELETE_KEY_INPUT = "\x1b[3~";
 const MAX_COUNT = 9999;
+
+function isDisambiguatedCtrlJ(data: string): boolean {
+  return !isEnterLikeInput(data) && matchesKey(data, Key.ctrl("j"));
+}
 const TEXT_INSERT_REPEAT_KEYS = new Set(["i", "a", "A", "I"]);
 const OPEN_LINE_REPEAT_KEYS = new Set(["o", "O"]);
 const REPEATABLE_COMMAND_START_KEYS = new Set([
@@ -1002,9 +1006,7 @@ export class ModalEditor extends CustomEditor {
     return Array.from({ length: overrideCount }, (_, index) =>
       index === 0
         ? command.countOverrideKeys
-        : // Standalone j scrolls the transcript in Normal mode. Use Vim's 2_
-          // motion to advance one prompt line before replaying another O insert.
-          ["2", "_", ...command.countOverrideKeys],
+        : ["j", ...command.countOverrideKeys],
     ).flat();
   }
 
@@ -1362,6 +1364,9 @@ export class ModalEditor extends CustomEditor {
       }
 
       if ("insert" === this.mode) {
+        if (isDisambiguatedCtrlJ(data) || matchesKey(data, Key.ctrl("k"))) {
+          return;
+        }
         if (matchesKey(data, Key.ctrl("d"))) {
           // CustomEditor treats Ctrl-D on an empty prompt as app.exit. Forward
           // the equivalent Delete key instead so Insert mode keeps its editing
@@ -2439,10 +2444,11 @@ export class ModalEditor extends CustomEditor {
         data === "E" ||
         data === "B";
       const supportsCountedParagraphMotion = data === "{" || data === "}";
-      const supportsCountedNav = data === "h" || data === "l";
+      const supportsCountedNav =
+        data === "h" || data === "j" || data === "k" || data === "l";
       const supportsCountedTranscriptScroll =
-        data === "j" ||
-        data === "k" ||
+        isDisambiguatedCtrlJ(data) ||
+        matchesKey(data, "ctrl+k") ||
         matchesKey(data, "ctrl+u") ||
         matchesKey(data, "ctrl+d") ||
         matchesKey(data, "ctrl+b") ||
@@ -2452,7 +2458,7 @@ export class ModalEditor extends CustomEditor {
       if (supportsCountedNav) {
         const count = this.takeTotalCount(1);
         const clamped = Math.min(count, MAX_COUNT);
-        if (isVisualMode(this.mode)) {
+        if ((data === "h" || data === "l") && isVisualMode(this.mode)) {
           const { line, col } = this.getCurrentLineAndCol();
           const graphemes = getLineGraphemes(line);
           const currentIndex = graphemes.findIndex(({ end }) => col < end);
@@ -2462,8 +2468,13 @@ export class ModalEditor extends CustomEditor {
             data === "h" ? graphemeIndex : graphemes.length - graphemeIndex;
           const steps = Math.min(clamped, availableSteps);
           this.moveCursorBy(data === "h" ? -steps : steps);
+        } else if (data === "h") {
+          this.moveCursorBy(-clamped);
+        } else if (data === "l") {
+          this.moveCursorBy(clamped);
         } else {
-          this.moveCursorBy(data === "h" ? -clamped : clamped);
+          const delta = data === "j" ? clamped : -clamped;
+          this.moveCursorVertically(delta);
         }
         return;
       }
@@ -2490,21 +2501,23 @@ export class ModalEditor extends CustomEditor {
     }
 
     const isTranscriptScroll =
-      data === "j" ||
-      data === "k" ||
+      isDisambiguatedCtrlJ(data) ||
+      matchesKey(data, "ctrl+k") ||
       matchesKey(data, "ctrl+u") ||
       matchesKey(data, "ctrl+d") ||
       matchesKey(data, "ctrl+b") ||
       matchesKey(data, "ctrl+f");
     if (isTranscriptScroll) {
       const unit =
-        data === "j" || data === "k"
+        isDisambiguatedCtrlJ(data) || matchesKey(data, "ctrl+k")
           ? "line"
           : matchesKey(data, "ctrl+u") || matchesKey(data, "ctrl+d")
             ? "halfPage"
             : "page";
       const direction =
-        data === "k" || matchesKey(data, "ctrl+u") || matchesKey(data, "ctrl+b")
+        matchesKey(data, "ctrl+k") ||
+        matchesKey(data, "ctrl+u") ||
+        matchesKey(data, "ctrl+b")
           ? "up"
           : "down";
       this.transcriptScrollFn({
