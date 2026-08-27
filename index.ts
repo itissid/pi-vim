@@ -241,6 +241,12 @@ type ModalEditorInternals = {
 
 type CustomEditorConstructorArgs = ConstructorParameters<typeof CustomEditor>;
 
+type TranscriptScrollRequest = {
+  unit: "line" | "halfPage" | "page";
+  direction: "up" | "down";
+  count: number;
+};
+
 type ModalEditorOptions = {
   labelColorizers?: ModeColorizers | null;
   borderColorizers?: ModeColorizers | null;
@@ -258,6 +264,8 @@ type ModalEditorOptions = {
   // Reverse-video transform applied to the label. When the label defers to the
   // host color it is wrapped with this so it keeps its block styling.
   labelTransform?: ((s: string) => string) | null;
+  onTranscriptSearch?: () => void;
+  onTranscriptScroll?: (request: TranscriptScrollRequest) => void;
 };
 
 export class ModalEditor extends CustomEditor {
@@ -344,6 +352,9 @@ export class ModalEditor extends CustomEditor {
   };
   private pendingAsyncDispatches: number = 0;
   private restoreLatestDispatchStateFn: (() => void) | null = null;
+  private transcriptSearchFn: () => void = () => {};
+  private transcriptScrollFn: (request: TranscriptScrollRequest) => void =
+    () => {};
 
   constructor(
     tui: CustomEditorConstructorArgs[0],
@@ -359,6 +370,8 @@ export class ModalEditor extends CustomEditor {
     this.borderSync = opts?.borderSync ?? null;
     this.labelSync = opts?.labelSync ?? null;
     this.labelTransform = opts?.labelTransform ?? null;
+    this.transcriptSearchFn = opts?.onTranscriptSearch ?? (() => {});
+    this.transcriptScrollFn = opts?.onTranscriptScroll ?? (() => {});
     this.installModeBorderColorizer();
   }
 
@@ -988,7 +1001,9 @@ export class ModalEditor extends CustomEditor {
     return Array.from({ length: overrideCount }, (_, index) =>
       index === 0
         ? command.countOverrideKeys
-        : ["j", ...command.countOverrideKeys],
+        : // Standalone j scrolls the transcript in Normal mode. Use Vim's 2_
+          // motion to advance one prompt line before replaying another O insert.
+          ["2", "_", ...command.countOverrideKeys],
     ).flat();
   }
 
@@ -2416,14 +2431,20 @@ export class ModalEditor extends CustomEditor {
         data === "E" ||
         data === "B";
       const supportsCountedParagraphMotion = data === "{" || data === "}";
-      const supportsCountedNav =
-        data === "h" || data === "j" || data === "k" || data === "l";
+      const supportsCountedNav = data === "h" || data === "l";
+      const supportsCountedTranscriptScroll =
+        data === "j" ||
+        data === "k" ||
+        matchesKey(data, "ctrl+u") ||
+        matchesKey(data, "ctrl+d") ||
+        matchesKey(data, "ctrl+b") ||
+        matchesKey(data, "ctrl+f");
       const supportsCountedUnderscore = data === "_";
 
       if (supportsCountedNav) {
         const count = this.takeTotalCount(1);
         const clamped = Math.min(count, MAX_COUNT);
-        if ((data === "h" || data === "l") && isVisualMode(this.mode)) {
+        if (isVisualMode(this.mode)) {
           const { line, col } = this.getCurrentLineAndCol();
           const graphemes = getLineGraphemes(line);
           const currentIndex = graphemes.findIndex(({ end }) => col < end);
@@ -2433,13 +2454,8 @@ export class ModalEditor extends CustomEditor {
             data === "h" ? graphemeIndex : graphemes.length - graphemeIndex;
           const steps = Math.min(clamped, availableSteps);
           this.moveCursorBy(data === "h" ? -steps : steps);
-        } else if (data === "h") {
-          this.moveCursorBy(-clamped);
-        } else if (data === "l") {
-          this.moveCursorBy(clamped);
         } else {
-          const delta = data === "j" ? clamped : -clamped;
-          this.moveCursorVertically(delta);
+          this.moveCursorBy(data === "h" ? -clamped : clamped);
         }
         return;
       }
@@ -2454,6 +2470,7 @@ export class ModalEditor extends CustomEditor {
         !supportsCountedCharMotion &&
         !supportsCountedWordMotion &&
         !supportsCountedParagraphMotion &&
+        !supportsCountedTranscriptScroll &&
         !supportsCountedUnderscore
       ) {
         this.prefixCount = "";
@@ -2461,6 +2478,32 @@ export class ModalEditor extends CustomEditor {
       }
     } else if (isCountStarter(data)) {
       this.prefixCount = data;
+      return;
+    }
+
+    const isTranscriptScroll =
+      data === "j" ||
+      data === "k" ||
+      matchesKey(data, "ctrl+u") ||
+      matchesKey(data, "ctrl+d") ||
+      matchesKey(data, "ctrl+b") ||
+      matchesKey(data, "ctrl+f");
+    if (isTranscriptScroll) {
+      const unit =
+        data === "j" || data === "k"
+          ? "line"
+          : matchesKey(data, "ctrl+u") || matchesKey(data, "ctrl+d")
+            ? "halfPage"
+            : "page";
+      const direction =
+        data === "k" || matchesKey(data, "ctrl+u") || matchesKey(data, "ctrl+b")
+          ? "up"
+          : "down";
+      this.transcriptScrollFn({
+        unit,
+        direction,
+        count: this.takeTotalCount(),
+      });
       return;
     }
 
@@ -2472,6 +2515,11 @@ export class ModalEditor extends CustomEditor {
     if (data === "g") {
       this.pendingGCount = "";
       this.pendingG = true;
+      return;
+    }
+
+    if (data === "/") {
+      this.transcriptSearchFn();
       return;
     }
 
@@ -4202,6 +4250,31 @@ export default function (pi: ExtensionAPI) {
         labelSync,
         offBorderColor,
         labelTransform: reverseVideo,
+        onTranscriptSearch: () => {
+          const viewport = tui as unknown as { openSearch?: () => void };
+          viewport.openSearch?.();
+        },
+        onTranscriptScroll: ({ unit, direction, count }) => {
+          const viewport = tui as unknown as {
+            scrollBy?: (lines: number) => void;
+            getPrimaryScrollView?: () => { viewportHeight: number };
+            terminal?: { rows?: number };
+          };
+          const viewportHeight = Math.max(
+            1,
+            viewport.getPrimaryScrollView?.().viewportHeight ??
+              viewport.terminal?.rows ??
+              1,
+          );
+          const linesPerStep =
+            unit === "line"
+              ? 1
+              : unit === "halfPage"
+                ? Math.max(1, Math.floor(viewportHeight / 2))
+                : Math.max(1, viewportHeight - 4);
+          const sign = direction === "up" ? -1 : 1;
+          viewport.scrollBy?.(sign * linesPerStep * count);
+        },
       });
       editor.setClipboardMirrorPolicy(clipboardMirrorPolicy.policy);
       editor.setQuitFn(() => ctx.shutdown());

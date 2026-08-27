@@ -74,6 +74,7 @@ Common quick wins:
 | `Esc` / `Ctrl+[` | Insert → Normal mode |
 | `Esc` / `Ctrl+[` | Normal mode → pass to Pi (aborts the agent under default Pi keybindings) |
 | `:` | Normal → EX mini-mode |
+| `/` | Open Pi's transcript search (full-screen TUI) |
 | `i` | Normal → Insert at cursor |
 | `a` | Normal → Insert after cursor |
 | `I` | Normal → Insert at first non-whitespace |
@@ -145,7 +146,10 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 
 | key | action |
 |---|---|
-| `h` / `l` / `j` / `k`; `{count}h/l/j/k` | Move left/right/down/up; line moves clamp to the buffer |
+| `h` / `l`; `{count}h/l` | Move left/right within the prompt |
+| `j` / `k`; `{count}j/k` | Scroll the fullscreen chat transcript down/up by line |
+| `Ctrl+d` / `Ctrl+u` | Scroll the transcript down/up by half a page |
+| `Ctrl+f` / `Ctrl+b` | Scroll the transcript down/up by a full page |
 | `0` / `^` / `_` / `$` | Line start / first non-whitespace / counted first non-whitespace / line end |
 | `gg` / `G`; `{count}gg` / `{count}G` | Buffer start/end or absolute 1-indexed line |
 | `gM`; `{count}gM` | Halfway the text of the line; a count of `1`-`100` moves to that percentage of it (higher counts mean halfway, per nvim); text is measured in graphemes, not screen cells |
@@ -153,6 +157,8 @@ Most navigation keys accept a `{count}` prefix (max: `9999`); `%` intentionally 
 | `W` / `B` / `E`; `{count}W/B/E` | whitespace-delimited `WORD` motions |
 | `{` / `}`; `{count}{` / `{count}}` | Previous/next paragraph start |
 | `%` | Jump to the matching `()`, `[]`, or `{}` partner |
+
+Transcript navigation is Normal-mode-only; Insert-mode `j` and `k` remain ordinary text. Counts multiply transcript line/page movement. Operator-pending `j`/`k` keep their linewise prompt-editing behavior (`d2j`, `c3k`, and similar).
 
 `word` splits punctuation from keyword chars; `WORD` treats any non-whitespace run as one token (`foo-bar`, `path/to`). Paragraph starts are non-blank lines at BOF or after blank lines (`^\s*$`). `{` / `}` are navigation-only; brace operator forms (`d{`, `c}`, `y{`, …) are out of scope.
 
@@ -488,7 +494,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 | Text objects | `iw` / `aw`, `iW` / `aW`, quote objects, and paren/bracket/brace objects; delimited counts cancel | Full text-object set |
 | `%` matching | `()`, `[]`, `{}` only; lexical same-delimiter matching with no counts, quote/angle matching, parser/matchit logic, or mixed-delimiter validation | Also supports percentage jumps and broader matching |
 | Count prefix | Operators, motions, navigation, `x`, `r`, `p`, `P`; capped at `MAX_COUNT=9999` | Full support |
-| Named registers / macros / search | Not implemented; the unnamed register is supported | Supported |
+| Named registers / macros / Vim buffer search | Not implemented (`/` opens Pi transcript search); the unnamed register is supported | Supported |
 | Ex commands | EX mini-mode quits (`:q`, `:qa`, `:quit`, `:qall`, `:quitall`, and their `!` forms), dispatches non-conflicting Pi slash commands (`:tree`, `:model opus`), and runs shell commands via `:!cmd`; vim ex semantics are reserved, not implemented | Full ex command-line surface |
 | Multi-line operators | `d/c/y` with `w/e/b`, `W/E/B`, `j/k`, and `G`; not the full Vim motion matrix | Rich cross-line semantics |
 
@@ -497,6 +503,7 @@ pi-vim does not bundle any such tool and does not care which one you use — any
 Also out of scope (not already covered by a row above):
 
 - Tag (`it`, `at`), paragraph/sentence (`ip`, `ap`, `is`, `as`), and angle-bracket (`i<`, `a<`) text objects
+- Vim buffer search (`?`, `n`, `N`; `/` opens Pi's transcript search)
 - Vim ex-command semantics (`:s`, `:g`, `:w`, `:r`, …) — those names are reserved; the ex line supports quit flows, known Pi commands, and `:!cmd`, not vim ex semantics
 - Ex-line completion of Pi command names, and `::name` force-dispatch of a reserved name
 - Replace mode (`R`) — only `r{char}` is supported

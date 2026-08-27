@@ -856,6 +856,92 @@ describe("wrapper-facing editor surface", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Transcript search mapping
+// ---------------------------------------------------------------------------
+
+describe("transcript navigation mappings", () => {
+  it("scrolls transcript lines with j and k in normal mode", () => {
+    const scrolls: string[] = [];
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      onTranscriptScroll: ({ unit, direction, count }) => {
+        scrolls.push(`${unit}:${direction}:${count}`);
+      },
+    });
+
+    sendKeys(editor, ["hello\nworld", "\x1b", "j", "k", "3", "j"]);
+
+    assert.deepEqual(scrolls, ["line:down:1", "line:up:1", "line:down:3"]);
+    assert.equal(editor.getText(), "hello\nworld");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("scrolls transcript by half and full pages with Vim control keys", () => {
+    const scrolls: string[] = [];
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      onTranscriptScroll: ({ unit, direction, count }) => {
+        scrolls.push(`${unit}:${direction}:${count}`);
+      },
+    });
+
+    sendKeys(editor, ["\x1b", "\x15", "\x04", "\x02", "\x06"]);
+
+    assert.deepEqual(scrolls, [
+      "halfPage:up:1",
+      "halfPage:down:1",
+      "page:up:1",
+      "page:down:1",
+    ]);
+  });
+
+  it("keeps j and k as ordinary text in insert mode", () => {
+    let scrollCalls = 0;
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      onTranscriptScroll: () => {
+        scrollCalls++;
+      },
+    });
+
+    sendKeys(editor, ["jk"]);
+
+    assert.equal(scrollCalls, 0);
+    assert.equal(editor.getText(), "jk");
+    assert.equal(editor.getMode(), "insert");
+  });
+});
+
+describe("transcript search mapping", () => {
+  it("opens transcript search with slash in normal mode", () => {
+    let searchCalls = 0;
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      onTranscriptSearch: () => {
+        searchCalls++;
+      },
+    });
+
+    sendKeys(editor, ["hello", "\x1b", "/"]);
+
+    assert.equal(searchCalls, 1);
+    assert.equal(editor.getText(), "hello");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("inserts slash without opening transcript search in insert mode", () => {
+    let searchCalls = 0;
+    const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {
+      onTranscriptSearch: () => {
+        searchCalls++;
+      },
+    });
+
+    sendKeys(editor, ["/"]);
+
+    assert.equal(searchCalls, 0);
+    assert.equal(editor.getText(), "/");
+    assert.equal(editor.getMode(), "insert");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Mode transitions
 // ---------------------------------------------------------------------------
 
@@ -1957,7 +2043,7 @@ describe("ex pi-command bridge", () => {
   it("restores a multi-line prompt after a dispatch", () => {
     const session = createBridgeSession("line one");
     sendKeys(session.editor, ["o", ..."line two".split(""), "\x1b"]);
-    sendKeys(session.editor, ["k", "0", "l"]);
+    sendKeys(session.editor, ["g", "g", "0", "l"]);
 
     runEx(session.editor, "tree");
 
@@ -4062,7 +4148,7 @@ describe("linewise operators and counts", () => {
     const { editor } = createMultiLineEditor("a\nb\nc\nd");
     const before = editor.getText();
 
-    sendKeys(editor, ["j", "2", "y", "y"]);
+    sendKeys(editor, ["2", "G", "2", "y", "y"]);
 
     assert.equal(editor.getText(), before);
     assert.equal(editor.getRegister(), "b\nc\n");
@@ -4109,7 +4195,7 @@ describe("linewise operators and counts", () => {
   it("dG from middle line deletes to EOF linewise", () => {
     const { editor } = createMultiLineEditor("a\nb\nc\nd");
 
-    sendKeys(editor, ["j", "d", "G"]);
+    sendKeys(editor, ["2", "G", "d", "G"]);
 
     assert.equal(editor.getText(), "a");
     assert.equal(editor.getRegister(), "b\nc\nd\n");
@@ -4487,10 +4573,10 @@ describe("paragraph motions — { / }", () => {
   it("paragraph motions from blank-line runs jump to surrounding paragraph starts", () => {
     const { editor } = createMultiLineEditor(paragraphFixture);
 
-    sendKeys(editor, ["j", "j", "}"]);
+    sendKeys(editor, ["3", "G", "}"]);
     assert.deepEqual(editor.getCursor(), { line: 4, col: 0 });
 
-    sendKeys(editor, ["j", "j", "{"]);
+    sendKeys(editor, ["7", "G", "{"]);
     assert.deepEqual(editor.getCursor(), { line: 4, col: 0 });
   });
 
@@ -6557,14 +6643,6 @@ describe("Universal Counts: Change and Nav", () => {
     assert.equal(editor.getMode(), "insert");
   });
 
-  it("3j moves cursor down three lines", () => {
-    const { editor } = createMultiLineEditor("a\nb\nc\nd\ne");
-
-    sendKeys(editor, ["3", "j"]);
-
-    assert.deepEqual(editor.getCursor(), { line: 3, col: 0 });
-  });
-
   it("3l moves cursor right by three columns", () => {
     const { editor } = createEditorWithSpy("abcdef");
 
@@ -6580,23 +6658,6 @@ describe("Universal Counts: Change and Nav", () => {
     sendKeys(editor, ["3", "h"]);
 
     assert.deepEqual(editor.getCursor(), { line: 0, col: 2 });
-  });
-
-  it("3k moves cursor up three lines", () => {
-    const { editor } = createMultiLineEditor("a\nb\nc\nd\ne");
-
-    sendKeys(editor, ["G", "3", "k"]);
-
-    assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
-  });
-
-  it("j moves by logical lines across wrapped content", () => {
-    const wrappedLine = "x".repeat(200);
-    const { editor } = createMultiLineEditor(`top\n${wrappedLine}\nbottom`);
-
-    sendKeys(editor, ["j", "j"]);
-
-    assert.deepEqual(editor.getCursor(), { line: 2, col: 0 });
   });
 });
 
@@ -7626,7 +7687,7 @@ describe("put — line-wise", () => {
 
   it("Y yanks current line (like yy)", () => {
     const { editor } = createMultiLineEditor("aaa\nbbb\nccc");
-    sendKeys(editor, ["j", "Y", "p"]);
+    sendKeys(editor, ["2", "G", "Y", "p"]);
     const lines = editor.getText().split("\n");
     assert.deepStrictEqual(lines, ["aaa", "bbb", "bbb", "ccc"]);
   });
@@ -7693,7 +7754,7 @@ describe("put — line-wise", () => {
   it("counted line-wise P lands on the first pasted line", () => {
     const { editor } = createMultiLineEditor("a\nb");
     editor.setRegister("X\n");
-    sendKeys(editor, ["j", "3", "P"]);
+    sendKeys(editor, ["2", "G", "3", "P"]);
     assert.equal(editor.getText(), "a\nX\nX\nX\nb");
     assert.deepEqual(editor.getCursor(), { line: 1, col: 0 });
   });
@@ -8583,16 +8644,16 @@ describe("undo / redo — u / ctrl+r", () => {
       sendKeys(editor, ["A"]);
       sendKeys(editor, ["!"]);
       sendKeys(editor, ["\x1b"]);
-      sendKeys(editor, ["j"]);
+      sendKeys(editor, ["2", "G"]);
       sendKeys(editor, ["A"]);
       sendKeys(editor, ["?"]);
       sendKeys(editor, ["\x1b"]);
       // 2u
       sendKeys(editor, ["2", "u"]);
-      // now press j — should move 1 line, not 2
-      sendKeys(editor, ["j"]);
-      // cursor should be on line 1 (0-indexed), not line 2
-      assert.strictEqual(editor.getCursor().line, 1);
+      // A following motion should use its own default count, not the old 2.
+      setInternalCursor(editor, 0, 0);
+      sendKeys(editor, ["l"]);
+      assert.strictEqual(editor.getCursor().col, 1);
     });
   });
 
@@ -9277,7 +9338,7 @@ describe("regression — delete handler recursion", () => {
 describe("additional count combinations", () => {
   it("d2k deletes current line and two above", () => {
     const { editor } = createMultiLineEditor("a\nb\nc\nd\ne");
-    sendKeys(editor, ["j", "j", "j", "d", "2", "k"]);
+    sendKeys(editor, ["4", "G", "d", "2", "k"]);
     assert.equal(editor.getText(), "a\ne");
     assert.equal(editor.getRegister(), "b\nc\nd\n");
   });
@@ -9293,12 +9354,6 @@ describe("additional count combinations", () => {
     sendKeys(editor, ["d", "2", "d"]);
     assert.equal(editor.getText(), "c");
     assert.equal(editor.getRegister(), "a\nb\n");
-  });
-
-  it("2j moves cursor down two lines (counted navigation)", () => {
-    const { editor } = createMultiLineEditor("a\nb\nc\nd");
-    sendKeys(editor, ["2", "j", "x"]);
-    assert.equal(editor.getText(), "a\nb\n\nd");
   });
 
   it("2dG cancels cleanly and swallows G because it is printable", () => {
