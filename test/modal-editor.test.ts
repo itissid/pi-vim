@@ -988,6 +988,44 @@ describe("insert mode control bindings", () => {
 });
 
 describe("transcript search mapping", () => {
+  it("opens current Pi transcript search through the installed editor", async () => {
+    const extension = await installExtensionWithEditorFactory();
+    let searchCalls = 0;
+    const tui = {
+      requestRender() {},
+      terminal: { rows: 40, cols: 120 },
+      toggleSearch() {
+        searchCalls++;
+      },
+    } as unknown as Parameters<EditorFactory>[0];
+    const editor = extension.editorFactory(tui, stubTheme, stubKeybindings);
+
+    sendKeys(editor, ["hello", "\x1b", "/"]);
+
+    assert.equal(searchCalls, 1);
+    assert.equal(editor.getText(), "hello");
+    assert.equal(editor.getMode(), "normal");
+  });
+
+  it("retains transcript search compatibility with older Pi", async () => {
+    const extension = await installExtensionWithEditorFactory();
+    let searchCalls = 0;
+    const tui = {
+      requestRender() {},
+      terminal: { rows: 40, cols: 120 },
+      openSearch() {
+        searchCalls++;
+      },
+    } as unknown as Parameters<EditorFactory>[0];
+    const editor = extension.editorFactory(tui, stubTheme, stubKeybindings);
+
+    sendKeys(editor, ["hello", "\x1b", "/"]);
+
+    assert.equal(searchCalls, 1);
+    assert.equal(editor.getText(), "hello");
+    assert.equal(editor.getMode(), "normal");
+  });
+
   it("opens transcript search with slash in normal mode", () => {
     let searchCalls = 0;
     const editor = new ModalEditor(stubTui, stubTheme, stubKeybindings, {

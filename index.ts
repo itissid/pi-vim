@@ -4272,8 +4272,17 @@ export default function (pi: ExtensionAPI) {
         offBorderColor,
         labelTransform: reverseVideo,
         onTranscriptSearch: () => {
-          const viewport = tui as unknown as { openSearch?: () => void };
-          viewport.openSearch?.();
+          const viewport = tui as unknown as {
+            toggleSearch?: () => void;
+            openSearch?: () => void;
+          };
+          // Pi 0.85 renamed this private fullscreen hook. Prefer the current
+          // name while retaining compatibility with older Pi installations.
+          if (viewport.toggleSearch) {
+            viewport.toggleSearch();
+          } else {
+            viewport.openSearch?.();
+          }
         },
         onTranscriptScroll: ({ unit, direction, count }) => {
           const viewport = tui as unknown as {
