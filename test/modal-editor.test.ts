@@ -13,6 +13,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  buildClipboardReadHelperSource,
+  buildClipboardWriteHelperSource,
+} from "../clipboard-mirror.js";
 import installPiVim, {
   ModalEditor,
   setModeChangeCommandRunnerForTests,
@@ -438,92 +442,19 @@ type HelperRunResult = {
 
 const CLIPBOARD_HELPER_TEST_TIMEOUT_MS = 5_000;
 
-async function getClipboardHelperSourceWithMock(
-  mockModuleSource: string,
-): Promise<string> {
-  const indexSource = await readFile(
-    new URL("../clipboard-mirror.ts", import.meta.url),
-    "utf8",
-  );
-  const match = /const CLIPBOARD_HELPER_SOURCE = `([\s\S]*?)`;/.exec(
-    indexSource,
-  );
-
-  assert.ok(match, "CLIPBOARD_HELPER_SOURCE not found");
-  assert.ok(match[1], "CLIPBOARD_HELPER_SOURCE was empty");
-
+function getClipboardHelperSourceWithMock(mockModuleSource: string): string {
   const mockModuleUrl = `data:text/javascript,${encodeURIComponent(mockModuleSource)}`;
-  const helperImportLine = [
-    "import { copyToClipboard } from ",
-    "$",
-    "{JSON.stringify(PI_CODING_AGENT_MODULE_URL)};",
-  ].join("");
-  const replacementImportLine = `import { copyToClipboard } from ${JSON.stringify(mockModuleUrl)};`;
-  const helperSource = match[1];
-
-  assert.equal(
-    helperSource.includes(helperImportLine),
-    true,
-    "clipboard helper import not found",
-  );
-
-  // The template body is raw source here, so runtime interpolations must be
-  // substituted the same way index.ts would; keep this list in step with
-  // CLIPBOARD_HELPER_SOURCE.
-  const exitCodeToken = ["$", "{CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE}"].join(
-    "",
-  );
-
-  const mockedSource = helperSource
-    .replace(helperImportLine, replacementImportLine)
-    .replace(exitCodeToken, "2");
-
-  assert.notEqual(
-    mockedSource,
-    helperSource,
-    "clipboard helper import was not replaced",
-  );
-  assert.equal(
-    mockedSource.includes(helperImportLine),
-    false,
-    "real clipboard helper import remains",
-  );
-  assert.equal(
-    mockedSource.includes(replacementImportLine),
-    true,
-    "mock clipboard import missing",
-  );
-  assert.equal(
-    mockedSource.includes(exitCodeToken),
-    false,
-    "copy-failed exit code interpolation was not substituted",
-  );
-
-  return mockedSource;
+  return buildClipboardWriteHelperSource(mockModuleUrl);
 }
 
-async function getClipboardReadHelperSourceWithMock(
+function getClipboardReadHelperSourceWithMock(
   mockClipboardExpression: string,
-): Promise<string> {
-  const indexSource = await readFile(
-    new URL("../clipboard-mirror.ts", import.meta.url),
-    "utf8",
-  );
-  const match = /const CLIPBOARD_READ_HELPER_SOURCE = `([\s\S]*?)`;/.exec(
-    indexSource,
-  );
-
-  assert.ok(match, "CLIPBOARD_READ_HELPER_SOURCE not found");
-  assert.ok(match[1], "CLIPBOARD_READ_HELPER_SOURCE was empty");
-
-  const requireLine = [
-    "const require = createRequire(",
-    "$",
-    "{JSON.stringify(PI_CODING_AGENT_MODULE_URL)});",
-  ].join("");
+): string {
+  const mockModuleUrl = import.meta.url;
+  const helperSource = buildClipboardReadHelperSource(mockModuleUrl);
+  const requireLine = `const require = createRequire(${JSON.stringify(mockModuleUrl)});`;
   const clipboardLine = 'const clipboard = require("@mariozechner/clipboard");';
   const replacement = `const clipboard = ${mockClipboardExpression};`;
-  const helperSource = match[1];
   const mockedSource = helperSource.replace(
     `${requireLine}\n${clipboardLine}`,
     replacement,
@@ -3703,28 +3634,41 @@ describe("cursor shape rendering", () => {
     assertNoCursorShapeSequences(lines);
   });
 
-  it("preserves the software cursor while supported hardware cursor display is disabled", () => {
+  it("re-enables the hardware cursor when it has been disabled, restoring shape control", () => {
     const tui = createCursorShapeTui({ initialShowHardwareCursor: false });
     const editor = new ModalEditor(tui, stubTheme, stubKeybindings);
     focusEditor(editor);
 
-    const disabledLines = editor.render(20);
-    const disabledMarkerLine = findCursorMarkerLine(disabledLines);
+    const lines = editor.render(20);
+    const markerLine = findCursorMarkerLine(lines);
 
-    assert.deepEqual(tui.terminalWrites, []);
-    assert.equal(tui.getShowHardwareCursorCalls, 1);
-    assert.equal(disabledMarkerLine.includes(SOFTWARE_CURSOR_SPACE), true);
-    assertNoCursorShapeSequences(disabledLines);
-
-    tui.setShowHardwareCursor?.(true);
-    const enabledLines = editor.render(20);
-    const enabledMarkerLine = findCursorMarkerLine(enabledLines);
-
+    // pi-vim owns cursor shaping, so a disabled (but supported) hardware
+    // cursor is re-enabled rather than falling back to a software block.
     assert.deepEqual(tui.hardwareCursorValues, [true]);
     assert.deepEqual(tui.terminalWrites, [INSERT_CURSOR_SHAPE]);
-    assert.equal(tui.getShowHardwareCursorCalls, 2);
-    assert.equal(enabledMarkerLine.includes(SOFTWARE_CURSOR_SPACE), false);
-    assertNoCursorShapeSequences(enabledLines);
+    assert.equal(tui.getShowHardwareCursorCalls, 1);
+    assert.equal(markerLine.includes(SOFTWARE_CURSOR_SPACE), false);
+    assertNoCursorShapeSequences(lines);
+  });
+
+  it("recovers cursor shape after the host disables the hardware cursor mid-session", () => {
+    // Models the reload regression: pi re-applies showHardwareCursor=false
+    // after pi-vim has already enabled it. The next render must re-assert and
+    // re-write the shape instead of leaving a stuck software block cursor.
+    const tui = createCursorShapeTui({ initialShowHardwareCursor: true });
+    const editor = new ModalEditor(tui, stubTheme, stubKeybindings);
+    focusEditor(editor);
+
+    editor.render(20);
+    assert.deepEqual(tui.terminalWrites, [INSERT_CURSOR_SHAPE]);
+
+    // Host (pi) disables the hardware cursor while the editor remains focused.
+    tui.setShowHardwareCursor?.(false);
+    tui.terminalWrites.length = 0;
+
+    editor.render(20);
+    assert.deepEqual(tui.hardwareCursorValues, [false, true]);
+    assert.deepEqual(tui.terminalWrites, [INSERT_CURSOR_SHAPE]);
   });
 
   it("keeps the software cursor when focused render has no cursor marker", () => {
