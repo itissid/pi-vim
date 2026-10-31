@@ -1,4 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { getPackageDir } from "@earendil-works/pi-coding-agent";
 
 const PI_NATIVE_CLIPBOARD_TIMEOUT_MS = 5000;
 const CLIPBOARD_WRITE_TIMEOUT_MS = PI_NATIVE_CLIPBOARD_TIMEOUT_MS + 500;
@@ -53,9 +56,12 @@ function isClipboardEnvironmentFailure(error: unknown): boolean {
   return error instanceof ClipboardSpawnError || isNodeSpawnErrno(error);
 }
 
-const PI_CODING_AGENT_MODULE_URL = import.meta.resolve(
-  "@earendil-works/pi-coding-agent",
-);
+// Pi's bundled CLI provides the SDK as a virtual module. Native package
+// resolution from a standalone checkout cannot see it, so anchor the child
+// helper to the running Pi installation instead of requiring local peers.
+const PI_CODING_AGENT_MODULE_URL = pathToFileURL(
+  join(getPackageDir(), "dist", "index.js"),
+).href;
 const CLIPBOARD_HELPER_COPY_FAILED_EXIT_CODE = 2;
 const CLIPBOARD_HELPER_SOURCE = `
 import { copyToClipboard } from ${JSON.stringify(PI_CODING_AGENT_MODULE_URL)};
